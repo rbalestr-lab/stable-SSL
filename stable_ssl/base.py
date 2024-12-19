@@ -49,51 +49,61 @@ from .utils import (
 class BaseTrainer(torch.nn.Module):
     r"""Base class for training a model.
 
-    That method provides a general boilerplate for all the internal operations
-    that always occur no matter the actual application and project. This includes
-    training, evaluation, checkpointing, restarting training, ...
-    The internals can be modified from the configs.
+    This class provides a general boilerplate for common operations that
+    occur during the training lifecycle, which can be customized via configuration.
+    These operations include training, evaluation, checkpointing, and training restart.
 
-    This class should be subclassed by your specific method (see examples).
+    The internals of these operations can be modified through configuration
+    settings, allowing flexibility for different projects and use cases.
+
+    This class is intended to be subclassed for specific training methods
+    (see examples for more details). For each subclass, the following methods must
+    be implemented: `forward`, `predict`, and `compute_loss`.
 
     Execution flow when calling `launch`:
 
-    - self.before_fit (nothing by default)
-    - self.fit (executes all the training/intermitent evaluation by default)
-      - for `self.optim["epochs"]` epochs:
-        - self.fit_epoch (one training epoch by default)
-          - self.before_fit_epoch (setup in train mode)
-          - loop over mini-batches
-            - self.before_fit_step (moves data to device)
-            - self.fit_step (computes loss and performs optimization step)
-            - self.after_fit_step (nothing by default)
-          - self.after_fit_epoch (nothing by default)
-        - self.evaluate (if asked by user config, looping over all non train datasets)
-          - self.before_eval (setup in eval mode)
-          - loop over mini-batches
-            - self.before_eval_step (moves data to device)
-            - self.eval_step (computes eval metrics)
-            - self.after_eval_step (nothing by default)
-          - self.after_eval (nothing by default)
-        - save intermitent checkpoint if asked by user config
-      - save final checkpoint if asked by user config
-    - self.after_fit (evaluates by default)
+            - `self.before_fit` (nothing by default)
+            - `self._fit` (executes all the training/intermittent evaluation by default)
+                - for `self.optim["epochs"]` epochs:
+                    - `self.before_fit_epoch` (setup in train mode)
+                    - `self._fit_epoch` (one training epoch by default)
+                        - loop over mini-batches
+                            - `self.before_fit_step` (moves data to device)
+                            - `self._fit_step` (computes loss and performs optimization step)
+                            - `self.after_fit_step` (nothing by default)
+                    - `self.after_fit_epoch` (nothing by default)
+                    - `self._evaluate` (if asked by user config, looping over all non-train datasets)
+                        - `self.before_eval` (setup in eval mode)
+                            - loop over mini-batches
+                                - `self.before_eval_step` (moves data to device)
+                                - `self._eval_step` (computes eval metrics)
+                                - `self.after_eval_step` (nothing by default)
+                        - `self.after_eval` (nothing by default)
+                    - Save intermittent checkpoint if asked by user config
+                - Save final checkpoint if asked by user config
+            - `self.after_fit` (evaluates by default)
+
 
     Parameters
     ----------
     data: dict
-        Data mapper of name->mini-batch. The dataset named `train` is used for training.
+        Names and construction of the dataloaders with their transform pipelines.
+        The dataset named `train` is used for training.
         Any other dataset is used for validation.
     module: dict
-        Module (NNs) configuration.
+        Names and definition of the modules (neural networks).
+        See :mod:`stable_ssl.modules` for examples of available modules.
     loss: dict
-        Loss configuration.
+        Loss function to be minimized. See :mod:`stable_ssl.losses` for examples.
     hardware: dict
-        Hardware configuration.
+        Hardware parameters. See :mod:`stable_ssl.config.HardwareConfig`
+        for the full list of parameters and their defaults.
     optim: dict
-        Optimizer configuration.
+        Optimization parameters. See :mod:`stable_ssl.config.OptimConfig`
+        for the full list of parameters and their defaults.
     logger: dict
-        Logger configuration.
+        Logging and checkpointing parameters. See :mod:`stable_ssl.config.LoggerConfig`
+        for the full list of parameters and their defaults.
     """
 
     def __init__(self, data, module, loss, hardware, optim, logger, **kwargs):
@@ -136,6 +146,7 @@ class BaseTrainer(torch.nn.Module):
         self.launch()
 
     def setup(self):
+        """Instantiate components and load the checkpoint (if applicable)."""
         logging.getLogger().setLevel(self._logger["level"])
         logging.info(f"=> SETUP OF {self.__class__.__name__} STARTED.")
         self._instanciate()
@@ -143,11 +154,33 @@ class BaseTrainer(torch.nn.Module):
         logging.info(f"=> SETUP OF {self.__class__.__name__} COMPLETED.")
 
     def launch(self):
-        """Routine that is launched after the class is initialized.
+        """Main routine for training and evaluation, triggered after class initialization.
 
-        This will commonly consist of training + evaluation.
-        Can be customized by the user to fit the use-cases.
-        This is just a boilerplate version that provides minimal things.
+        This method is responsible for executing the core training and evaluation process.
+        It is designed as a general boilerplate, providing minimal functionality, but can
+        be customized by the user to suit specific use cases.
+
+        The default execution flow is:
+        - If no "train" dataset is found in `self.data`, the method will run evaluation and cleanup.
+        - Otherwise, it proceeds with the following steps:
+            1. Calls `before_fit()` to execute any pre-training setup.
+            2. Runs the `_fit()` method to carry out the training process.
+            3. Calls `after_fit()` for any post-training tasks.
+
+        If the training is interrupted by the user (via `BreakAllEpochs`),
+        the process is stopped and an exception is logged.
+
+        If using the `wandb` logger, the method will finalize
+        the wandb session before cleanup.
+
+        Finally, the method ensures that the cleanup process is always performed,
+        whether training was completed or interrupted.
+
+        Exceptions
+        ----------
+        BreakAllEpochs
+            Raised if the training is interrupted by the user.
+
         """
         if "train" not in self.data:
             self._evaluate()
@@ -164,8 +197,9 @@ class BaseTrainer(torch.nn.Module):
             wandb.finish()
         self._cleanup()
 
+    @abstractmethod
     def forward(self):
-        return self.module["backbone"](self.batch[0])
+        pass
 
     @abstractmethod
     def predict(self):
