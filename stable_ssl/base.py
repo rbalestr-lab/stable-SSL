@@ -27,6 +27,7 @@ import torch
 from .data import DistributedSamplerWrapper
 from . import reader
 from .config import LoggerConfig, WandbConfig, HardwareConfig, OptimConfig
+from .monitors import Monitor
 
 try:
     import wandb
@@ -66,7 +67,7 @@ class BaseTrainer(torch.nn.Module):
           - loop over mini-batches
             - self.before_fit_step (moves data to device)
             - self.fit_step (computes loss and performs optimization step)
-            - self.after_fit_step (nothing by default)
+            - self.after_fit_step (computes per-step monitoring metrics)
           - self.after_fit_epoch (nothing by default)
         - self.evaluate (if asked by user config, looping over all non train datasets)
           - self.before_eval (setup in eval mode)
@@ -164,8 +165,9 @@ class BaseTrainer(torch.nn.Module):
             wandb.finish()
         self._cleanup()
 
+    @abstractmethod
     def forward(self):
-        return self.module["backbone"](self.batch[0])
+        pass
 
     @abstractmethod
     def predict(self):
@@ -254,7 +256,12 @@ class BaseTrainer(torch.nn.Module):
         self.batch = to_device(self.batch, self.device)
 
     def after_fit_step(self):
-        pass
+        if 'train' in self.logger['monitors']:
+            for metric in self.logger["monitors"]["train"].values():
+                metric: Monitor
+                score = metric.compute(self._latest_forward)
+                if self.global_step % self.logger["every_step"] == 0:
+                    self._log({f"train/{metric.name}": score})
 
     def before_eval(self):
         self.eval()
@@ -267,6 +274,7 @@ class BaseTrainer(torch.nn.Module):
 
     def after_eval_step(self):
         pass
+
 
     def _instanciate(self):
         seed_everything(self._hardware.get("seed", None))
@@ -585,6 +593,16 @@ class BaseTrainer(torch.nn.Module):
             for metric in self.logger["metrics"][name_loader].values():
                 metric.update(output, self.batch[1])
 
+        if name_loader in self.logger["monitors"]:
+            for metric in self.logger["monitors"][name_loader].values():
+                metric: Monitor
+                # NOTE To make this more general (e.g. for GradNorm, etc.)
+                # we should pass in the BaseModel in its entirety and let the compute method use
+                # what it needs. 
+                score = metric.compute(output)
+                if self.global_step % self.logger["every_step"]== 0:
+                    self._log({f'{name_loader}/{metric.name}': score})
+
     def _set_device(self, hardware):
         # Check if CUDA is available, otherwise set to CPU.
         if not torch.cuda.is_available() or hardware["device"] == "cpu":
@@ -783,3 +801,15 @@ class BaseTrainer(torch.nn.Module):
         logging.info("Cleaning up the current task before submitting a new one.")
         self._cleanup()
         return submitit.helpers.DelayedSubmission(model)
+
+
+    @property
+    def latest_forward(self):
+        if not hasattr(self, '_latest_forward'):
+            return None
+        return self._latest_forward
+
+    @latest_forward.setter
+    def latest_forward(self, value):
+        self._latest_forward = value
+

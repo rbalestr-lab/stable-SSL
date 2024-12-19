@@ -17,7 +17,7 @@ hydra:
 
 trainer:
   # ===== Base Trainer =====
-  _target_: stable_ssl.JointEmbedding
+  _target_: stable_ssl.JointEmbeddingTrainer
 
   # ===== loss Parameters =====
   loss:
@@ -93,7 +93,7 @@ trainer:
   # ===== Module Parameters =====
   module:
     backbone:
-      _target_: stable_ssl.utils.load_backbone
+      _target_: stable_ssl.load_backbone
       name: resnet18
       low_resolution: True
       num_classes: null

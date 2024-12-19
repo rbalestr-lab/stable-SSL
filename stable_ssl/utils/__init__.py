@@ -19,6 +19,7 @@ from .utils import (
     str_to_dtype,
     all_reduce,
 )
+
 from .exceptions import BreakEpoch, BreakStep, NanError, BreakAllEpochs
 
 __all__ = [

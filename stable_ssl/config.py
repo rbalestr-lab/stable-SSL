@@ -59,6 +59,8 @@ class LoggerConfig:
         The logging level. Determines the threshold for what gets logged. Default is 20.
     metrics : dict, optional
         A dictionary to store and log various metrics. Default is an empty dict.
+    monitors : dict, optional
+        A dictionary to store and log various monitoring statistics. Default is an empty dict.
     save_final_model : str or bool, optional
         Specifies whether to save the final trained model.
         If a name is provided, the final model will be saved with that name.
@@ -86,6 +88,7 @@ class LoggerConfig:
 
     level: int = 20
     metrics: dict = field(default_factory=dict)
+    monitors: dict = field(default_factory=dict)
     save_final_model: Union[str, bool] = False
     eval_every_epoch: int = 1
     every_step: int = 1

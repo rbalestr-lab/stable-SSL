@@ -55,11 +55,13 @@ class JointEmbeddingTrainer(BaseTrainer):
         return views, labels
 
     def predict(self):
-        return self.module["backbone_classifier"](self.forward())
+        return self.module["backbone_classifier"](self.module["backbone"](self.batch[0]))
+
 
     def compute_loss(self):
         views, labels = self.format_views_labels()
         embeddings = [self.module["backbone"](view) for view in views]
+        self.latest_forward = embeddings
         projections = [self.module["projector"](embed) for embed in embeddings]
 
         loss_ssl = self.loss(*projections)
